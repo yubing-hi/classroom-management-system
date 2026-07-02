@@ -1,0 +1,14 @@
+USE classroom_management;
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+DROP TABLE IF EXISTS `Reservation_Audit`;
+DROP TABLE IF EXISTS `Reservation`;
+DROP TABLE IF EXISTS `Schedule`;
+DROP TABLE IF EXISTS `Course`;
+DROP TABLE IF EXISTS `Classroom_Device`;
+DROP TABLE IF EXISTS `Device`;
+DROP TABLE IF EXISTS `Classroom`;
+DROP TABLE IF EXISTS `User`;
+
+SET FOREIGN_KEY_CHECKS = 1;
