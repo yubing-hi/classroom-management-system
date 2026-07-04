@@ -71,6 +71,45 @@ def paginate(items, page, page_size):
     return items[start:end], total
 
 
+def find_reservation_conflicts(cur, classroom_id, reservation_date, start_period, end_period, exclude_id=None):
+    sql = '''
+        SELECT reservation_id, user_id, start_period, end_period, status
+        FROM Reservation
+        WHERE classroom_id=%s
+          AND reservation_date=%s
+          AND status IN ('PENDING', 'APPROVED')
+    '''
+    params = [classroom_id, reservation_date]
+    if exclude_id:
+        sql += ' AND reservation_id != %s'
+        params.append(exclude_id)
+    cur.execute(sql, params)
+    return [
+        row for row in cur.fetchall()
+        if period_overlap(start_period, end_period, row['start_period'], row['end_period'])
+    ]
+
+
+def find_schedule_conflicts(cur, classroom_id, reservation_date, start_period, end_period):
+    date_obj = datetime.strptime(str(reservation_date), '%Y-%m-%d')
+    weekday = date_obj.isoweekday()
+    cur.execute(
+        '''
+        SELECT s.schedule_id, s.start_period, s.end_period,
+               c.course_name, u.name AS teacher_name
+        FROM Schedule s
+        JOIN Course c ON s.course_id = c.course_id
+        JOIN `User` u ON c.teacher_id = u.user_id
+        WHERE s.classroom_id=%s AND s.weekday=%s
+        ''',
+        (classroom_id, weekday),
+    )
+    return [
+        row for row in cur.fetchall()
+        if period_overlap(start_period, end_period, row['start_period'], row['end_period'])
+    ]
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @app.post('/api/auth/login')
@@ -191,9 +230,6 @@ def available_classrooms():
     if start_period > end_period:
         return fail('节次范围不合法')
 
-    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-    weekday = date_obj.isoweekday()
-
     conn = get_connection()
     try:
         with conn.cursor(DictCursor) as cur:
@@ -211,34 +247,10 @@ def available_classrooms():
             available = []
             for c in classrooms:
                 cid = c['classroom_id']
-                cur.execute(
-                    '''
-                    SELECT start_period, end_period FROM Reservation
-                    WHERE classroom_id=%s AND reservation_date=%s AND status='APPROVED'
-                    ''',
-                    (cid, date_str),
-                )
-                reserved = cur.fetchall()
-                conflict = any(
-                    period_overlap(start_period, end_period, r['start_period'], r['end_period'])
-                    for r in reserved
-                )
-                if conflict:
+                if find_reservation_conflicts(cur, cid, date_str, start_period, end_period):
                     continue
 
-                cur.execute(
-                    '''
-                    SELECT start_period, end_period FROM Schedule
-                    WHERE classroom_id=%s AND weekday=%s
-                    ''',
-                    (cid, weekday),
-                )
-                scheduled = cur.fetchall()
-                conflict = any(
-                    period_overlap(start_period, end_period, s['start_period'], s['end_period'])
-                    for s in scheduled
-                )
-                if conflict:
+                if find_schedule_conflicts(cur, cid, date_str, start_period, end_period):
                     continue
 
                 c['devices'] = fetch_classroom_devices(cur, cid)
@@ -610,6 +622,41 @@ def list_reservations():
         conn.close()
 
 
+@app.get('/api/reservations/conflicts')
+@login_required
+def reservation_conflicts():
+    classroom_id = request.args.get('classroom_id', type=int)
+    reservation_date = request.args.get('reservation_date', '')
+    start_period = request.args.get('start_period', type=int)
+    end_period = request.args.get('end_period', type=int)
+
+    if not all([classroom_id, reservation_date, start_period, end_period]):
+        return fail('请提供教室、日期和节次')
+    if start_period > end_period:
+        return fail('节次范围不合法')
+
+    conn = get_connection()
+    try:
+        with conn.cursor(DictCursor) as cur:
+            cur.execute('SELECT classroom_id FROM Classroom WHERE classroom_id=%s', (classroom_id,))
+            if not cur.fetchone():
+                return fail('教室不存在')
+
+            reservation_rows = find_reservation_conflicts(
+                cur, classroom_id, reservation_date, start_period, end_period
+            )
+            schedule_rows = find_schedule_conflicts(
+                cur, classroom_id, reservation_date, start_period, end_period
+            )
+        return ok({
+            'has_conflict': bool(reservation_rows or schedule_rows),
+            'reservation_conflicts': reservation_rows,
+            'schedule_conflicts': schedule_rows,
+        })
+    finally:
+        conn.close()
+
+
 @app.post('/api/reservations')
 @login_required
 def create_reservation():
@@ -638,27 +685,11 @@ def create_reservation():
             if classroom['status'] != 'AVAILABLE':
                 return fail('教室当前不可预约')
 
-            date_obj = datetime.strptime(reservation_date, '%Y-%m-%d')
-            weekday = date_obj.isoweekday()
+            if find_reservation_conflicts(cur, classroom_id, reservation_date, start_period, end_period):
+                return fail('该时段教室已有预约申请或已通过预约')
 
-            cur.execute(
-                '''
-                SELECT start_period, end_period FROM Reservation
-                WHERE classroom_id=%s AND reservation_date=%s AND status='APPROVED'
-                ''',
-                (classroom_id, reservation_date),
-            )
-            for r in cur.fetchall():
-                if period_overlap(start_period, end_period, r['start_period'], r['end_period']):
-                    return fail('该时段教室已被预约')
-
-            cur.execute(
-                'SELECT start_period, end_period FROM Schedule WHERE classroom_id=%s AND weekday=%s',
-                (classroom_id, weekday),
-            )
-            for s in cur.fetchall():
-                if period_overlap(start_period, end_period, s['start_period'], s['end_period']):
-                    return fail('该时段教室有课程安排')
+            if find_schedule_conflicts(cur, classroom_id, reservation_date, start_period, end_period):
+                return fail('该时段教室有课程安排')
 
             cur.execute(
                 '''INSERT INTO Reservation
@@ -715,27 +746,24 @@ def audit_reservation(reservation_id):
                 return fail('该预约已审核')
 
             if audit_result == 'APPROVED':
-                date_obj = datetime.strptime(str(row['reservation_date']), '%Y-%m-%d')
-                weekday = date_obj.isoweekday()
-                cur.execute(
-                    '''
-                    SELECT start_period, end_period FROM Reservation
-                    WHERE classroom_id=%s AND reservation_date=%s AND status='APPROVED'
-                    AND reservation_id != %s
-                    ''',
-                    (row['classroom_id'], row['reservation_date'], reservation_id),
-                )
-                for r in cur.fetchall():
-                    if period_overlap(row['start_period'], row['end_period'], r['start_period'], r['end_period']):
-                        return fail('该时段教室已被其他预约占用')
+                if find_reservation_conflicts(
+                    cur,
+                    row['classroom_id'],
+                    row['reservation_date'],
+                    row['start_period'],
+                    row['end_period'],
+                    exclude_id=reservation_id,
+                ):
+                    return fail('该时段教室已被其他预约占用')
 
-                cur.execute(
-                    'SELECT start_period, end_period FROM Schedule WHERE classroom_id=%s AND weekday=%s',
-                    (row['classroom_id'], weekday),
-                )
-                for s in cur.fetchall():
-                    if period_overlap(row['start_period'], row['end_period'], s['start_period'], s['end_period']):
-                        return fail('该时段教室有课程安排')
+                if find_schedule_conflicts(
+                    cur,
+                    row['classroom_id'],
+                    row['reservation_date'],
+                    row['start_period'],
+                    row['end_period'],
+                ):
+                    return fail('该时段教室有课程安排')
 
             cur.execute(
                 '''INSERT INTO Reservation_Audit
