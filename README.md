@@ -2,17 +2,94 @@
 
 ## 项目简介
 
-这是一个基于 MySQL 的高校教室管理系统课程设计项目，包含数据库设计、建表 SQL、测试数据、触发器与视图的初步实现。项目以“代码共享、数据库本地搭建”为协作模式，避免把敏感信息写入 Git 仓库。
+这是一个基于 MySQL 的高校教室管理系统课程设计项目，包含数据库设计、Flask 后端 API、Vue 3 前端页面。项目以“代码共享、数据库本地搭建”为协作模式，避免把敏感信息写入 Git 仓库。
 
 ## 目录结构
 
 - `sql/`: SQL 脚本
-- `app/`: Python 连接脚本与后续演示代码
+- `app/`: Python 后端 API（Flask）与数据库连接
+- `frontend/`: Vue 3 前端页面
 - `docs/`: 文档与设计说明
-- `design.md`: 数据库设计说明
-- `plan.md`: 项目开发计划
 - `.gitignore`: Git 忽略配置
 - `README.md`: 项目说明与协作流程
+
+## 快速启动
+
+完成一次性环境配置后，日常开发只需启动后端和前端两个服务。
+
+### 前置要求
+
+- MySQL 8.x
+- Python 3.11+
+- Node.js 18+
+
+### 一次性配置（首次克隆后执行）
+
+```bash
+# 1. 克隆仓库
+git clone 仓库地址
+cd classroom-management-system
+
+# 2. 安装 Python 依赖
+pip install -r app/requirements.txt
+
+# 3. 配置数据库连接
+copy .env.example .env
+# 编辑 .env，填入本机 MySQL 账号密码
+
+# 4. 建库建表
+mysql -u root -p < sql/create_tables.sql
+
+# 5. 导入测试数据（后需更改为完整数据）
+cd app
+python seed_data.py
+cd ..
+
+# 6. 验证数据库连接
+python app/db_connect.py
+
+# 7. 安装前端依赖
+cd frontend
+npm install
+cd ..
+```
+
+### 日常启动（两个终端）
+
+**终端 1 — 启动后端 API**
+
+```bash
+cd app
+python app.py
+```
+
+后端地址：`http://localhost:5000`
+
+**终端 2 — 启动前端页面**
+
+```bash
+cd frontend
+npm run dev
+```
+
+前端地址：`http://localhost:5173`
+
+浏览器打开 **http://localhost:5173** 即可使用系统。
+
+### 测试账号
+
+| 账号 | 密码 | 角色 | 进入页面 |
+| --- | --- | --- | --- |
+| 9001 | 123456 | 管理员 | 管理员端（教室/课程管理、预约审核） |
+| 1001 | 123456 | 教师 | 使用者端（查询、预约） |
+| 2001 | 123456 | 学生 | 使用者端（查询、预约） |
+
+### 重置测试数据
+
+```bash
+cd app
+python seed_data.py
+```
 
 ## 重要说明
 
@@ -27,7 +104,7 @@
 3. 由共享仓库中的 `sql/create_tables.sql` 建库建表。
 4. 本地数据库连接配置写入 `.env`，不提交到仓库。
 
-## 环境准备
+## 环境准备（详细介绍）
 
 ### 1. 克隆仓库
 
@@ -100,14 +177,40 @@ mysql -u root -p classroom_management < sql/create_tables.sql
 
 ### 7. 导入测试数据
 
+**Windows（推荐）：**
+
+```bash
+cd app
+python seed_data.py
+```
+
+**Linux / macOS：**
+
 ```bash
 mysql -u <your_user> -p classroom_management < sql/insert_test_data.sql
 ```
 
-### 8. 如果需要重置数据库
+### 8. 安装并启动前端（首次）
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 9. 启动后端 API
+
+```bash
+cd app
+python app.py
+```
+
+### 10. 如果需要重置数据库
 
 ```bash
 mysql -u <your_user> -p classroom_management < sql/drop_tables.sql
+mysql -u <your_user> -p < sql/create_tables.sql
+cd app && python seed_data.py
 ```
 
 ## 小组协作全流程
@@ -138,21 +241,27 @@ git checkout -b feature/sql
 - 更新 `sql/insert_test_data.sql`
 - 完善 `sql/triggers.sql`、`sql/views.sql`、`sql/queries.sql`
 
-#### 如果你负责 Python 代码
-- 在 `app/` 中添加或修改演示脚本
+#### 如果你负责 Python 后端
+- 维护 `app/app.py` 中的 REST API
 - 使用 `app/db_connect.py` 获取连接
+- 参考 `docs/后端协作说明.md` 与前端对接
 - 不要把 `.env` 提交到仓库
+
+#### 如果你负责前端
+- 在 `frontend/` 中开发页面
+- 参考 `docs/前端实现文档.md`
+- API 基地址配置在 `frontend/.env.development`
 
 #### 如果你负责文档
 - 更新 `docs/数据库设计说明.md`
 - 完善 `docs/数据字典.md`
-- 补充 `design.md` 与 `plan.md`
 
 ### 4. 本地测试
 
-- 运行 `app/db_connect.py` 验证连接
-- 运行 SQL 脚本验证建表、插入数据是否正常
-- 如果修改了 SQL，建议先在本地执行 `sql/create_tables.sql` 和 `sql/insert_test_data.sql`
+- 运行 `python app/db_connect.py` 验证数据库连接
+- 运行 `python app/app.py` 启动后端，确认 `http://localhost:5000` 可访问
+- 运行 `cd frontend && npm run dev` 启动前端，确认 `http://localhost:5173` 可登录
+- 使用测试账号（9001 / 1001 / 2001，密码均为 123456）验证各角色功能
 
 ### 5. 提交并推送
 
@@ -178,6 +287,15 @@ git push origin feature/<你的功能名>
 - 不要把 `classrooms.db` 放到仓库里。
 - 如果你本地有 `.env`，请确认 `.gitignore` 已忽略。
 - 每次协作前先 `git pull`，避免冲突。
+
+## 文档索引
+
+| 文档 | 说明 |
+| --- | --- |
+| `docs/后端协作说明.md` | 后端 API 约定、联调方式（后端同学必读） |
+| `docs/前端实现文档.md` | 前端页面与接口设计（前端同学必读） |
+| `docs/数据库设计说明.md` | 表关系、触发器、视图设计 |
+| `docs/数据字典.md` | 各表字段含义 |
 
 ## 项目发展建议
 

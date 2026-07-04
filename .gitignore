@@ -5,3 +5,6 @@ __pycache__/
 *.db
 *.sqlite
 classrooms.db
+
+frontend/node_modules/
+frontend/dist/
