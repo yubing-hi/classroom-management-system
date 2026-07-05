@@ -638,28 +638,6 @@ def create_reservation():
             if classroom['status'] != 'AVAILABLE':
                 return fail('教室当前不可预约')
 
-            date_obj = datetime.strptime(reservation_date, '%Y-%m-%d')
-            weekday = date_obj.isoweekday()
-
-            cur.execute(
-                '''
-                SELECT start_period, end_period FROM Reservation
-                WHERE classroom_id=%s AND reservation_date=%s AND status='APPROVED'
-                ''',
-                (classroom_id, reservation_date),
-            )
-            for r in cur.fetchall():
-                if period_overlap(start_period, end_period, r['start_period'], r['end_period']):
-                    return fail('该时段教室已被预约')
-
-            cur.execute(
-                'SELECT start_period, end_period FROM Schedule WHERE classroom_id=%s AND weekday=%s',
-                (classroom_id, weekday),
-            )
-            for s in cur.fetchall():
-                if period_overlap(start_period, end_period, s['start_period'], s['end_period']):
-                    return fail('该时段教室有课程安排')
-
             cur.execute(
                 '''INSERT INTO Reservation
                    (user_id, classroom_id, reservation_date, start_period, end_period, purpose)
@@ -668,6 +646,11 @@ def create_reservation():
             )
             new_id = cur.lastrowid
         return ok({'reservation_id': new_id}, '预约提交成功')
+    except Exception as e:
+        msg = str(e)
+        if '该时段教室已被预约' in msg or '该时段教室有课程安排' in msg:
+            return fail(msg)
+        return fail('预约提交失败')
     finally:
         conn.close()
 
@@ -714,41 +697,18 @@ def audit_reservation(reservation_id):
             if row['status'] != 'PENDING':
                 return fail('该预约已审核')
 
-            if audit_result == 'APPROVED':
-                date_obj = datetime.strptime(str(row['reservation_date']), '%Y-%m-%d')
-                weekday = date_obj.isoweekday()
-                cur.execute(
-                    '''
-                    SELECT start_period, end_period FROM Reservation
-                    WHERE classroom_id=%s AND reservation_date=%s AND status='APPROVED'
-                    AND reservation_id != %s
-                    ''',
-                    (row['classroom_id'], row['reservation_date'], reservation_id),
-                )
-                for r in cur.fetchall():
-                    if period_overlap(row['start_period'], row['end_period'], r['start_period'], r['end_period']):
-                        return fail('该时段教室已被其他预约占用')
-
-                cur.execute(
-                    'SELECT start_period, end_period FROM Schedule WHERE classroom_id=%s AND weekday=%s',
-                    (row['classroom_id'], weekday),
-                )
-                for s in cur.fetchall():
-                    if period_overlap(row['start_period'], row['end_period'], s['start_period'], s['end_period']):
-                        return fail('该时段教室有课程安排')
-
             cur.execute(
                 '''INSERT INTO Reservation_Audit
                    (reservation_id, admin_id, audit_result, audit_comment)
                    VALUES (%s,%s,%s,%s)''',
                 (reservation_id, g.user['user_id'], audit_result, audit_comment or None),
             )
-            new_status = 'APPROVED' if audit_result == 'APPROVED' else 'REJECTED'
-            cur.execute(
-                'UPDATE Reservation SET status=%s WHERE reservation_id=%s',
-                (new_status, reservation_id),
-            )
         return ok(message='审核完成')
+    except Exception as e:
+        msg = str(e)
+        if '该时段教室已被预约' in msg or '该时段教室有课程安排' in msg:
+            return fail(msg)
+        return fail('审核失败')
     finally:
         conn.close()
 
