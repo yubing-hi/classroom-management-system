@@ -699,6 +699,11 @@ def create_reservation():
             )
             new_id = cur.lastrowid
         return ok({'reservation_id': new_id}, '预约提交成功')
+    except Exception as e:
+        msg = str(e)
+        if '该时段教室已被预约' in msg or '该时段教室有课程安排' in msg:
+            return fail(msg)
+        return fail('预约提交失败')
     finally:
         conn.close()
 
@@ -771,12 +776,12 @@ def audit_reservation(reservation_id):
                    VALUES (%s,%s,%s,%s)''',
                 (reservation_id, g.user['user_id'], audit_result, audit_comment or None),
             )
-            new_status = 'APPROVED' if audit_result == 'APPROVED' else 'REJECTED'
-            cur.execute(
-                'UPDATE Reservation SET status=%s WHERE reservation_id=%s',
-                (new_status, reservation_id),
-            )
         return ok(message='审核完成')
+    except Exception as e:
+        msg = str(e)
+        if '该时段教室已被预约' in msg or '该时段教室有课程安排' in msg:
+            return fail(msg)
+        return fail('审核失败')
     finally:
         conn.close()
 

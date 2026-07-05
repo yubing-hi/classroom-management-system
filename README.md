@@ -91,6 +91,17 @@ cd app
 python seed_data.py
 ```
 
+### 数据库视图
+
+- `View_Reservation_Detail`：聚合预约、用户、教室和审核结果，便于查看预约详情。
+- `View_Course_Schedule`：展示课程、教师和教室的排课信息。
+- `View_Classroom_Usage`：汇总教室的排课与预约使用情况，便于后续统计分析。
+
+创建方式：
+```bash
+mysql -u <your_user> -p classroom_management < sql/views.sql
+```
+
 ## 重要说明
 
 - 不要将 `classrooms.db` 上传到 GitHub。
