@@ -1,8 +1,43 @@
+import re
 from pathlib import Path
+
 from pymysql.cursors import DictCursor
+
 from db_connect import get_connection
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
+CREATE_TRIGGER_PATTERN = re.compile(
+    r'CREATE TRIGGER\s+\w+.*?END\s*;',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def parse_sql_file(path: Path) -> list[str]:
+    """Parse SQL file into statements executable via pymysql."""
+    text = path.read_text(encoding='utf-8')
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        upper = stripped.upper()
+        if upper.startswith('USE ') or upper.startswith('DELIMITER'):
+            continue
+        lines.append(line)
+    text = '\n'.join(lines).replace('END//', 'END;')
+
+    statements: list[str] = []
+    pos = 0
+    for match in CREATE_TRIGGER_PATTERN.finditer(text):
+        before = text[pos:match.start()]
+        statements.extend(stmt for stmt in _split_simple_statements(before))
+        statements.append(match.group(0).strip())
+        pos = match.end()
+    statements.extend(stmt for stmt in _split_simple_statements(text[pos:]))
+    return statements
+
+
+def _split_simple_statements(text: str) -> list[str]:
+    return [stmt.strip() for stmt in text.split(';') if stmt.strip()]
 TABLES = [
     'Reservation_Audit', 'Reservation', 'Schedule', 'Course',
     'Classroom_Device', 'Device', 'Classroom', 'User',
@@ -78,7 +113,21 @@ SEED = [
     ),
     (
         'INSERT INTO Schedule (course_id,classroom_id,weekday,start_period,end_period,start_week,end_week) VALUES (%s,%s,%s,%s,%s,%s,%s)',
-        [(1, 1, 3, 3, 4, 1, 16)],
+        [
+            (1, 1, 3, 3, 4, 1, 16),   # 张老师 - 数据库系统
+            (2, 2, 1, 1, 2, 1, 16),   # 张老师 - 计算机组成原理
+            (3, 3, 2, 3, 4, 1, 16),   # 张老师 - 操作系统
+            (4, 4, 4, 5, 6, 1, 16),   # 张老师 - 软件工程
+            (9, 5, 5, 1, 2, 1, 16),   # 张老师 - 人工智能导论
+            (10, 6, 1, 7, 8, 1, 16),  # 张老师 - 机器学习
+            (11, 7, 3, 5, 6, 1, 16),  # 张老师 - 深度学习
+            (25, 8, 2, 1, 2, 1, 16),  # 张老师 - 计算思维
+            (5, 9, 1, 3, 4, 1, 16),   # 王老师 - 数据结构
+            (6, 10, 2, 5, 6, 1, 16),  # 王老师 - 算法设计
+            (7, 11, 4, 1, 2, 1, 16),  # 王老师 - 计算机网络
+            (8, 12, 5, 3, 4, 1, 16),  # 王老师 - 编译原理
+            (13, 13, 2, 7, 8, 1, 16), # 王老师 - Web前端开发
+        ],
     ),
     (
         'INSERT INTO Reservation (user_id,classroom_id,reservation_date,start_period,end_period,purpose) VALUES (%s,%s,%s,%s,%s,%s)',
@@ -106,10 +155,8 @@ def main():
             sql_files = [ROOT_DIR / 'sql' / 'triggers.sql', ROOT_DIR / 'sql' / 'views.sql']
             for sql_path in sql_files:
                 if sql_path.exists():
-                    sql_text = sql_path.read_text(encoding='utf-8')
-                    for statement in [stmt.strip() for stmt in sql_text.split(';') if stmt.strip()]:
-                        if statement:
-                            cur.execute(statement)
+                    for statement in parse_sql_file(sql_path):
+                        cur.execute(statement)
         conn.commit()
 
         with conn.cursor(DictCursor) as cur:
