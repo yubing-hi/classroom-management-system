@@ -12,6 +12,7 @@ const navs = [
   { path: '/user/classrooms', label: '教室查询' },
   { path: '/user/courses', label: '课程查询' },
   { path: '/user/reservations', label: '我的预约' },
+  { path: '/user/timetable', label: '课表视图' },
 ]
 
 async function handleLogout() {
@@ -35,7 +36,7 @@ async function handleLogout() {
         <el-button link type="primary" @click="handleLogout">退出</el-button>
       </div>
     </el-header>
-    <el-main class="main">
+    <el-main class="main" :class="{ 'wide-main': $route.path.includes('timetable') }">
       <router-view />
     </el-main>
   </el-container>
@@ -51,4 +52,5 @@ async function handleLogout() {
 .nav { flex: 1; border-bottom: none; }
 .user-bar { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 .main { max-width: 1200px; margin: 0 auto; width: 100%; }
+.main.wide-main { max-width: 1400px; }
 </style>

@@ -20,6 +20,7 @@ const router = createRouter({
         { path: 'classrooms', name: 'AdminClassrooms', component: () => import('@/views/admin/ClassroomManage.vue') },
         { path: 'courses', name: 'AdminCourses', component: () => import('@/views/admin/CourseManage.vue') },
         { path: 'reservations', name: 'AdminReservations', component: () => import('@/views/admin/ReservationAudit.vue') },
+        { path: 'timetable', name: 'AdminTimetable', component: () => import('@/views/shared/TimetableView.vue') },
       ],
     },
     {
@@ -31,6 +32,7 @@ const router = createRouter({
         { path: 'classrooms', name: 'UserClassrooms', component: () => import('@/views/user/ClassroomQuery.vue') },
         { path: 'courses', name: 'UserCourses', component: () => import('@/views/user/CourseQuery.vue') },
         { path: 'reservations', name: 'UserReservations', component: () => import('@/views/user/Reservation.vue') },
+        { path: 'timetable', name: 'UserTimetable', component: () => import('@/views/shared/TimetableView.vue') },
       ],
     },
   ],

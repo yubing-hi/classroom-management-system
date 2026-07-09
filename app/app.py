@@ -8,6 +8,15 @@ from flask_cors import CORS
 from pymysql.cursors import DictCursor
 
 from db_connect import get_connection
+from semester import (
+    current_week,
+    date_to_week,
+    get_semester_start,
+    get_total_weeks,
+    week_dates,
+    week_overlap,
+    week_to_range,
+)
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
@@ -90,23 +99,62 @@ def find_reservation_conflicts(cur, classroom_id, reservation_date, start_period
     ]
 
 
+def reservation_week(reservation_date):
+    return date_to_week(reservation_date)
+
+
 def find_schedule_conflicts(cur, classroom_id, reservation_date, start_period, end_period):
+    week_num = reservation_week(reservation_date)
+    if week_num is None:
+        return []
+
     date_obj = datetime.strptime(str(reservation_date), '%Y-%m-%d')
     weekday = date_obj.isoweekday()
     cur.execute(
         '''
-        SELECT s.schedule_id, s.start_period, s.end_period,
+        SELECT s.schedule_id, s.start_period, s.end_period, s.start_week, s.end_week,
                c.course_name, u.name AS teacher_name
         FROM Schedule s
         JOIN Course c ON s.course_id = c.course_id
         JOIN `User` u ON c.teacher_id = u.user_id
         WHERE s.classroom_id=%s AND s.weekday=%s
+          AND %s BETWEEN s.start_week AND s.end_week
         ''',
-        (classroom_id, weekday),
+        (classroom_id, weekday, week_num),
     )
     return [
         row for row in cur.fetchall()
         if period_overlap(start_period, end_period, row['start_period'], row['end_period'])
+    ]
+
+
+def find_schedule_self_conflicts(
+    cur,
+    classroom_id,
+    weekday,
+    start_period,
+    end_period,
+    start_week,
+    end_week,
+    exclude_id=None,
+):
+    sql = '''
+        SELECT s.schedule_id, s.start_period, s.end_period, s.start_week, s.end_week,
+               c.course_name, cl.building, cl.room_number
+        FROM Schedule s
+        JOIN Course c ON s.course_id = c.course_id
+        JOIN Classroom cl ON s.classroom_id = cl.classroom_id
+        WHERE s.classroom_id=%s AND s.weekday=%s
+    '''
+    params = [classroom_id, weekday]
+    if exclude_id:
+        sql += ' AND s.schedule_id != %s'
+        params.append(exclude_id)
+    cur.execute(sql, params)
+    return [
+        row for row in cur.fetchall()
+        if period_overlap(start_period, end_period, row['start_period'], row['end_period'])
+        and week_overlap(start_week, end_week, row['start_week'], row['end_week'])
     ]
 
 
@@ -518,7 +566,23 @@ def create_schedule():
 
     conn = get_connection()
     try:
-        with conn.cursor() as cur:
+        with conn.cursor(DictCursor) as cur:
+            conflicts = find_schedule_self_conflicts(
+                cur,
+                body['classroom_id'],
+                body['weekday'],
+                body['start_period'],
+                body['end_period'],
+                body['start_week'],
+                body['end_week'],
+            )
+            if conflicts:
+                c = conflicts[0]
+                return fail(
+                    f'与已有排课冲突：{c["course_name"]} '
+                    f'({c["building"]}-{c["room_number"]} '
+                    f'第{c["start_week"]}-{c["end_week"]}周)'
+                )
             cur.execute(
                 '''INSERT INTO Schedule
                    (course_id, classroom_id, weekday, start_period, end_period, start_week, end_week)
@@ -540,10 +604,34 @@ def update_schedule(schedule_id):
     body = request.get_json(silent=True) or {}
     conn = get_connection()
     try:
-        with conn.cursor() as cur:
-            cur.execute('SELECT schedule_id FROM Schedule WHERE schedule_id=%s', (schedule_id,))
-            if not cur.fetchone():
+        with conn.cursor(DictCursor) as cur:
+            cur.execute('SELECT * FROM Schedule WHERE schedule_id=%s', (schedule_id,))
+            existing = cur.fetchone()
+            if not existing:
                 return fail('排课不存在', status=404)
+
+            merged = {**existing, **body}
+            if merged['start_period'] > merged['end_period'] or merged['start_week'] > merged['end_week']:
+                return fail('节次或周次范围不合法')
+
+            conflicts = find_schedule_self_conflicts(
+                cur,
+                merged['classroom_id'],
+                merged['weekday'],
+                merged['start_period'],
+                merged['end_period'],
+                merged['start_week'],
+                merged['end_week'],
+                exclude_id=schedule_id,
+            )
+            if conflicts:
+                c = conflicts[0]
+                return fail(
+                    f'与已有排课冲突：{c["course_name"]} '
+                    f'({c["building"]}-{c["room_number"]} '
+                    f'第{c["start_week"]}-{c["end_week"]}周)'
+                )
+
             fields, params = [], []
             for key in ('course_id', 'classroom_id', 'weekday', 'start_period', 'end_period', 'start_week', 'end_week'):
                 if key in body:
@@ -782,6 +870,100 @@ def audit_reservation(reservation_id):
         if '该时段教室已被预约' in msg or '该时段教室有课程安排' in msg:
             return fail(msg)
         return fail('审核失败')
+    finally:
+        conn.close()
+
+
+# ── Timetable & Semester ──────────────────────────────────────────────────────
+
+def serialize_row(row):
+    for key, value in list(row.items()):
+        if hasattr(value, 'isoformat'):
+            row[key] = value.isoformat()
+    return row
+
+
+@app.get('/api/semester')
+@login_required
+def semester_info():
+    start = get_semester_start()
+    return ok({
+        'semester_start_date': start.isoformat(),
+        'total_weeks': get_total_weeks(),
+        'current_week': current_week(),
+    })
+
+
+@app.get('/api/timetable')
+@login_required
+def timetable():
+    week = request.args.get('week', current_week(), type=int)
+    classroom_id = request.args.get('classroom_id', type=int)
+    teacher_id = request.args.get('teacher_id', '').strip()
+
+    total = get_total_weeks()
+    if week < 1 or week > total:
+        return fail(f'周次需在 1-{total} 之间')
+
+    week_range = week_to_range(week)
+    if not week_range:
+        return fail('无效周次')
+    week_start, week_end = week_range
+    dates = week_dates(week)
+
+    conn = get_connection()
+    try:
+        with conn.cursor(DictCursor) as cur:
+            schedule_sql = '''
+                SELECT s.schedule_id, s.course_id, s.classroom_id, s.weekday,
+                       s.start_period, s.end_period, s.start_week, s.end_week,
+                       c.course_name, c.teacher_id, u.name AS teacher_name,
+                       cl.building, cl.room_number
+                FROM Schedule s
+                JOIN Course c ON s.course_id = c.course_id
+                JOIN `User` u ON c.teacher_id = u.user_id
+                JOIN Classroom cl ON s.classroom_id = cl.classroom_id
+                WHERE %s BETWEEN s.start_week AND s.end_week
+            '''
+            schedule_params = [week]
+            if classroom_id:
+                schedule_sql += ' AND s.classroom_id = %s'
+                schedule_params.append(classroom_id)
+            if teacher_id:
+                schedule_sql += ' AND c.teacher_id = %s'
+                schedule_params.append(teacher_id)
+            schedule_sql += ' ORDER BY s.weekday, s.start_period, s.schedule_id'
+            cur.execute(schedule_sql, schedule_params)
+            schedules = [serialize_row(r) for r in cur.fetchall()]
+
+            reservation_sql = '''
+                SELECT r.reservation_id, r.user_id, r.classroom_id,
+                       r.reservation_date, r.start_period, r.end_period,
+                       r.purpose, r.status, u.name AS user_name,
+                       cl.building, cl.room_number
+                FROM Reservation r
+                JOIN `User` u ON r.user_id = u.user_id
+                JOIN Classroom cl ON r.classroom_id = cl.classroom_id
+                WHERE r.reservation_date BETWEEN %s AND %s
+                  AND r.status IN ('PENDING', 'APPROVED')
+            '''
+            reservation_params = [week_start, week_end]
+            if classroom_id:
+                reservation_sql += ' AND r.classroom_id = %s'
+                reservation_params.append(classroom_id)
+            reservation_sql += ' ORDER BY r.reservation_date, r.start_period, r.reservation_id'
+            cur.execute(reservation_sql, reservation_params)
+            reservations = [serialize_row(r) for r in cur.fetchall()]
+
+        return ok({
+            'week': week,
+            'total_weeks': total,
+            'week_start': week_start.isoformat(),
+            'week_end': week_end.isoformat(),
+            'dates': [d.isoformat() for d in dates],
+            'schedules': schedules,
+            'reservations': reservations,
+        })
     finally:
         conn.close()
 
