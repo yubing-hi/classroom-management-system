@@ -69,6 +69,52 @@ export interface PageResult<T> {
   page_size: number
 }
 
+export interface SemesterInfo {
+  semester_start_date: string
+  total_weeks: number
+  current_week: number
+}
+
+export interface TimetableSchedule {
+  schedule_id: number
+  course_id: number
+  classroom_id: number
+  weekday: number
+  start_period: number
+  end_period: number
+  start_week: number
+  end_week: number
+  course_name: string
+  teacher_id: string
+  teacher_name: string
+  building: string
+  room_number: string
+}
+
+export interface TimetableReservation {
+  reservation_id: number
+  user_id: string
+  classroom_id: number
+  reservation_date: string
+  start_period: number
+  end_period: number
+  purpose: string
+  status: 'PENDING' | 'APPROVED'
+  user_name: string
+  building: string
+  room_number: string
+}
+
+export interface TimetableData {
+  week: number
+  total_weeks: number
+  week_start: string
+  week_end: string
+  dates: string[]
+  schedules: TimetableSchedule[]
+  reservations: TimetableReservation[]
+}
+
 export interface ApiResponse<T = unknown> {
   code: number
   message: string

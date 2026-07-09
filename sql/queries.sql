@@ -20,10 +20,17 @@ WHERE c.status = 'AVAILABLE'
   AND NOT EXISTS (
       SELECT 1
       FROM `Schedule` s
+      CROSS JOIN (
+          SELECT CAST(config_value AS DATE) AS semester_start
+          FROM `System_Config`
+          WHERE config_key = 'semester_start_date'
+          LIMIT 1
+      ) cfg
       WHERE s.classroom_id = c.classroom_id
         AND s.weekday = WEEKDAY(@target_date) + 1
         AND @start_period <= s.end_period
         AND @end_period >= s.start_period
+        AND FLOOR(DATEDIFF(@target_date, cfg.semester_start) / 7) + 1 BETWEEN s.start_week AND s.end_week
   )
 ORDER BY c.building, c.room_number;
 

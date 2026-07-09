@@ -39,3 +39,8 @@ VALUES
 INSERT INTO `Reservation_Audit` (reservation_id, admin_id, audit_result, audit_comment)
 VALUES
     (1, '9001', 'APPROVED', '审核通过');
+
+INSERT INTO `System_Config` (config_key, config_value) VALUES
+    ('semester_start_date', '2026-02-24'),
+    ('semester_total_weeks', '20')
+ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);

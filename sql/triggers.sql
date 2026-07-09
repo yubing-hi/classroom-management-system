@@ -9,6 +9,25 @@ CREATE TRIGGER trg_reservation_before_insert
 BEFORE INSERT ON `Reservation`
 FOR EACH ROW
 BEGIN
+    DECLARE v_semester_start DATE;
+    DECLARE v_total_weeks INT;
+    DECLARE v_week_num INT;
+
+    SELECT config_value INTO v_semester_start
+    FROM `System_Config` WHERE config_key = 'semester_start_date' LIMIT 1;
+
+    SELECT CAST(config_value AS UNSIGNED) INTO v_total_weeks
+    FROM `System_Config` WHERE config_key = 'semester_total_weeks' LIMIT 1;
+
+    IF v_semester_start IS NULL THEN
+        SET v_semester_start = '2026-02-24';
+    END IF;
+    IF v_total_weeks IS NULL OR v_total_weeks <= 0 THEN
+        SET v_total_weeks = 20;
+    END IF;
+
+    SET v_week_num = FLOOR(DATEDIFF(NEW.reservation_date, v_semester_start) / 7) + 1;
+
     IF EXISTS (
         SELECT 1
         FROM `Reservation` r
@@ -22,13 +41,14 @@ BEGIN
             SET MESSAGE_TEXT = '该时段教室已有预约申请或已通过预约';
     END IF;
 
-    IF EXISTS (
+    IF v_week_num >= 1 AND v_week_num <= v_total_weeks AND EXISTS (
         SELECT 1
         FROM `Schedule` s
         WHERE s.classroom_id = NEW.classroom_id
           AND s.weekday = WEEKDAY(NEW.reservation_date) + 1
           AND NEW.start_period <= s.end_period
           AND NEW.end_period >= s.start_period
+          AND v_week_num BETWEEN s.start_week AND s.end_week
     ) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = '该时段教室有课程安排';

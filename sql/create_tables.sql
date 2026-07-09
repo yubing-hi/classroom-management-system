@@ -129,3 +129,15 @@ CREATE TABLE IF NOT EXISTS `Reservation_Audit` (
         FOREIGN KEY (admin_id) REFERENCES `User`(user_id)
         ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 系统配置表
+CREATE TABLE IF NOT EXISTS `System_Config` (
+    config_key VARCHAR(50) NOT NULL,
+    config_value VARCHAR(255) NOT NULL,
+    PRIMARY KEY (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `System_Config` (config_key, config_value) VALUES
+    ('semester_start_date', '2026-02-24'),
+    ('semester_total_weeks', '20')
+ON DUPLICATE KEY UPDATE config_value = VALUES(config_value);

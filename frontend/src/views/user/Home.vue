@@ -9,6 +9,7 @@ const cards = [
   { title: '教室查询', desc: '浏览教室信息，按日期节次查询空闲教室', path: '/user/classrooms', color: '#409eff' },
   { title: '课程查询', desc: '查看课程安排与上课教室', path: '/user/courses', color: '#67c23a' },
   { title: '教室预约', desc: '提交预约申请，管理我的预约', path: '/user/reservations', color: '#e6a23c' },
+  { title: '课表视图', desc: '按周查看排课与预约占用情况', path: '/user/timetable', color: '#909399' },
 ]
 </script>
 
@@ -19,7 +20,7 @@ const cards = [
       <p>请选择以下功能开始使用</p>
     </el-card>
     <el-row :gutter="20" style="margin-top: 20px">
-      <el-col :span="8" v-for="c in cards" :key="c.path">
+      <el-col :span="6" v-for="c in cards" :key="c.path">
         <el-card shadow="hover" class="feature-card" @click="router.push(c.path)">
           <div class="icon" :style="{ background: c.color }">{{ c.title[0] }}</div>
           <h3>{{ c.title }}</h3>

@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import { OfficeBuilding, Reading, Calendar, DataBoard } from '@element-plus/icons-vue'
+import { OfficeBuilding, Reading, Calendar, DataBoard, Grid } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import { logout } from '@/api/auth'
 
@@ -17,6 +17,7 @@ const menus = [
   { path: '/admin/classrooms', label: '教室管理', icon: OfficeBuilding },
   { path: '/admin/courses', label: '课程管理', icon: Reading },
   { path: '/admin/reservations', label: '预约审核', icon: Calendar },
+  { path: '/admin/timetable', label: '课表视图', icon: Grid },
 ]
 
 async function handleLogout() {

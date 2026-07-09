@@ -38,9 +38,47 @@ def parse_sql_file(path: Path) -> list[str]:
 
 def _split_simple_statements(text: str) -> list[str]:
     return [stmt.strip() for stmt in text.split(';') if stmt.strip()]
+
+
+def parse_ddl_file(path: Path) -> list[str]:
+    """Parse DDL SQL (create_tables.sql) into executable statements."""
+    lines = []
+    for line in path.read_text(encoding='utf-8').splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('--'):
+            continue
+        upper = stripped.upper()
+        if upper.startswith('USE '):
+            continue
+        lines.append(line)
+    return _split_simple_statements('\n'.join(lines))
+
+
+def ensure_schema(cur) -> None:
+    """Create database / tables if missing; safe to run on existing local DB."""
+    ddl_path = ROOT_DIR / 'sql' / 'create_tables.sql'
+    if not ddl_path.exists():
+        raise FileNotFoundError(f'缺少建表脚本: {ddl_path}')
+
+    print('检查/更新数据库结构 (create_tables.sql)...')
+    for statement in parse_ddl_file(ddl_path):
+        cur.execute(statement)
+
+
+def apply_sql_objects(cur, *filenames: str) -> None:
+    for filename in filenames:
+        sql_path = ROOT_DIR / 'sql' / filename
+        if not sql_path.exists():
+            print(f'跳过缺失文件: {filename}')
+            continue
+        print(f'应用 {filename}...')
+        for statement in parse_sql_file(sql_path):
+            cur.execute(statement)
+
+
 TABLES = [
     'Reservation_Audit', 'Reservation', 'Schedule', 'Course',
-    'Classroom_Device', 'Device', 'Classroom', 'User',
+    'Classroom_Device', 'Device', 'Classroom', 'User', 'System_Config',
 ]
 
 SEED = [
@@ -137,26 +175,31 @@ SEED = [
         'INSERT INTO Reservation_Audit (reservation_id,admin_id,audit_result,audit_comment) VALUES (%s,%s,%s,%s)',
         [(1, '9001', 'APPROVED', '审核通过')],
     ),
+    (
+        'INSERT INTO System_Config (config_key,config_value) VALUES (%s,%s)',
+        [('semester_start_date', '2026-02-24'), ('semester_total_weeks', '20')],
+    ),
 ]
+
+
+def reset_seed_data(cur) -> None:
+    print('清空并导入测试数据...')
+    cur.execute('SET FOREIGN_KEY_CHECKS=0')
+    for table in TABLES:
+        cur.execute(f'DELETE FROM `{table}`')
+        cur.execute(f'ALTER TABLE `{table}` AUTO_INCREMENT = 1')
+    cur.execute('SET FOREIGN_KEY_CHECKS=1')
+    for sql, rows in SEED:
+        cur.executemany(sql, rows)
 
 
 def main():
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute('SET FOREIGN_KEY_CHECKS=0')
-            for table in TABLES:
-                cur.execute(f'DELETE FROM `{table}`')
-                cur.execute(f'ALTER TABLE `{table}` AUTO_INCREMENT = 1')
-            cur.execute('SET FOREIGN_KEY_CHECKS=1')
-            for sql, rows in SEED:
-                cur.executemany(sql, rows)
-
-            sql_files = [ROOT_DIR / 'sql' / 'triggers.sql', ROOT_DIR / 'sql' / 'views.sql']
-            for sql_path in sql_files:
-                if sql_path.exists():
-                    for statement in parse_sql_file(sql_path):
-                        cur.execute(statement)
+            ensure_schema(cur)
+            reset_seed_data(cur)
+            apply_sql_objects(cur, 'triggers.sql', 'views.sql')
         conn.commit()
 
         with conn.cursor(DictCursor) as cur:
@@ -164,7 +207,7 @@ def main():
             print('用户数据：')
             for row in cur.fetchall():
                 print(f"  {row['user_id']} | {row['name']} | {row['role']}")
-        print('测试数据导入成功')
+        print('数据库初始化完成（结构 + 测试数据 + 触发器 + 视图）')
     finally:
         conn.close()
 
